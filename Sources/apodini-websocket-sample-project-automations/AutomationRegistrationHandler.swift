@@ -6,6 +6,7 @@
 //
 
 import Apodini
+import Foundation
 
 extension Automation: Codable {
     func encode(to encoder: Encoder) throws {
@@ -27,11 +28,15 @@ extension Automation: Codable {
 
 
 struct AutomationRegistrationHandler: Handler {
+    @Throws(.badInput, .webSocketConnectionConsequence(.closeContext)) var badAutomationError: ApodiniError
         
     @Parameter var automation: Automation
     
-    func handle() throws -> Bool {
-        print(automation.description)
-        return true
+    @Environment(\.automationStore) var automationStore: AutomationStore
+    
+    func handle() throws -> UUID {
+        let uuid = UUID()
+        try badAutomationError.rethrow(automationStore.addAutomation(automation, with: uuid))
+        return uuid
     }
 }

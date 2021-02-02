@@ -12,6 +12,8 @@ enum AutomationDecodingError: Error {
     case unableToDecode(String)
 }
 
+// MARK: Automation
+
 struct Automation: LosslessStringConvertible {
     private let statement: Statement
     
@@ -26,6 +28,8 @@ struct Automation: LosslessStringConvertible {
         statement.description
     }
 }
+
+// MARK: Statement
 
 private struct Statement: LosslessStringConvertible {
     private static let regex = try! NSRegularExpression(pattern: "^(.+)\\s-->\\s(.+)$")
@@ -55,6 +59,8 @@ private struct Statement: LosslessStringConvertible {
     }
 }
 
+// MARK: Condition
+
 private struct Condition: LosslessStringConvertible {
     private static let regex = try! NSRegularExpression(pattern: "^(.+)\\s(.+)\\s(.+)$")
     
@@ -62,7 +68,7 @@ private struct Condition: LosslessStringConvertible {
     
     private let expression2: Expression
     
-    private let `operator`: Operator
+    private let comparator: Comparator
     
     init?(_ description: String) {
         guard let match = (description ~~ Self.regex).first else {
@@ -74,10 +80,10 @@ private struct Condition: LosslessStringConvertible {
         }
         self.expression1 = expression1
         
-        guard let `operator` = Operator(match[1]) else {
+        guard let comparator = Comparator(match[1]) else {
             return nil
         }
-        self.operator = `operator`
+        self.comparator = comparator
         
         guard let expression2 = Expression(match[2]) else {
             return nil
@@ -86,13 +92,16 @@ private struct Condition: LosslessStringConvertible {
     }
     
     var description: String {
-        "\(expression1.description) \(`operator`.description) \(expression2.description)"
+        "\(expression1.description) \(comparator.description) \(expression2.description)"
     }
 }
 
-private enum Expression: LosslessStringConvertible {
+// MARK: Expression
+
+private indirect enum Expression: LosslessStringConvertible {
     case channel(Channel)
     case value(Double)
+    case expression(Expression, Operator, Expression)
     
     init?(_ description: String) {
         if let channel = Channel(description) {
@@ -110,11 +119,15 @@ private enum Expression: LosslessStringConvertible {
             return channel.description
         case .value(let value):
             return value.description
+        case let .expression(lhs, `operator`, rhs):
+            return "(\(lhs.description)) \(`operator`.description) (\(rhs.description))"
         }
     }
 }
 
-private enum Operator: LosslessStringConvertible {
+// MARK: Comparator
+
+private enum Comparator: LosslessStringConvertible {
     case equal, unequal, lower, greater, lowerEqual, greaterEqual
     
     init?(_ description: String) {
@@ -154,12 +167,46 @@ private enum Operator: LosslessStringConvertible {
     }
 }
 
+private enum Operator: LosslessStringConvertible {
+    case plus, minus, times, divide
+    
+    init?(_ description: String) {
+        switch description {
+        case "+":
+            self = .plus
+        case "-":
+            self = .minus
+        case "*":
+            self = .times
+        case "/":
+            self = .divide
+        default:
+            return nil
+        }
+    }
+    
+    var description: String {
+        switch self {
+        case .plus:
+            return "+"
+        case .minus:
+            return "-"
+        case .times:
+            return "*"
+        case .divide:
+            return "/"
+        }
+    }
+}
+
+// MARK: Action
+
 private struct Action: LosslessStringConvertible {
     private static let regex = try! NSRegularExpression(pattern: "^(.+)\\s=\\s(.+)$")
     
     private let channel: Channel
     
-    private let value: Double
+    private let expression: Expression
     
     init?(_ description: String) {
         guard let match = (description ~~ Self.regex).first else {
@@ -171,23 +218,32 @@ private struct Action: LosslessStringConvertible {
         }
         self.channel = channel
         
-        guard let value = Double(match[1]) else {
+        guard let expression = Expression(match[1]) else {
             return nil
         }
-        self.value = value
+        self.expression = expression
     }
     
     var description: String {
-        "\(channel) = \(value)"
+        "\(channel) = \(expression)"
     }
 }
 
-private struct Channel: LosslessStringConvertible {
+// MARK: Channel
+
+struct Channel {
+    let deviceId: String
+    
+    let channelId: String
+    
+    internal init(deviceId: String, channelId: String) {
+        self.deviceId = deviceId
+        self.channelId = channelId
+    }
+}
+
+extension Channel: LosslessStringConvertible {
     private static let regex = try! NSRegularExpression(pattern: "^([[:alnum:]]+):([[:alnum:]]+)$")
-    
-    private let deviceId: String
-    
-    private let channelId: String
     
     init?(_ description: String) {
         guard let match = (description ~~ Self.regex).first else {
@@ -200,5 +256,181 @@ private struct Channel: LosslessStringConvertible {
     
     var description: String {
         "\(deviceId):\(channelId)"
+    }
+}
+
+extension Channel: Hashable { }
+
+// MARK: Automation Evaluation
+
+enum AutomationEvaluationError: Error {
+    case missingChannel(Channel)
+}
+
+
+extension Automation {
+    func evaluate(with values: [Channel:Double]) throws -> [(channel: Channel, value: Double)] {
+        try self.statement.evaluate(with: values)
+    }
+}
+
+extension Statement {
+    func evaluate(with values: [Channel:Double]) throws -> [(channel: Channel, value: Double)] {
+        if try self.condition.evaluate(with: values) {
+            return [try self.action.evaluate(with: values)]
+        }
+        return []
+    }
+}
+
+extension Condition {
+    func evaluate(with values: [Channel:Double]) throws -> Bool {
+        let value1 = try expression1.evaluate(with: values)
+        let value2 = try expression2.evaluate(with: values)
+        
+        return self.comparator.evaluate(lhs: value1, rhs: value2)
+    }
+}
+
+extension Action {
+    func evaluate(with values: [Channel:Double]) throws -> (channel: Channel, value: Double) {
+        (channel: self.channel, value: try self.expression.evaluate(with: values))
+    }
+}
+
+extension Expression {
+    func evaluate(with values: [Channel:Double]) throws -> Double {
+        switch self {
+        case .value(let value):
+            return value
+        case .channel(let channel):
+            guard let value = values[channel] else {
+                throw AutomationEvaluationError.missingChannel(channel)
+            }
+            return value
+        case let .expression(lhs, `operator`, rhs):
+            return `operator`.evaluate(lhs: try lhs.evaluate(with: values), rhs: try rhs.evaluate(with: values))
+        }
+    }
+}
+
+extension Comparator {
+    func evaluate(lhs: Double, rhs: Double) -> Bool {
+        switch self {
+        case .equal:
+            return lhs == rhs
+        case .unequal:
+            return lhs != rhs
+        case .lower:
+            return lhs < rhs
+        case .greater:
+            return lhs > rhs
+        case .lowerEqual:
+            return lhs <= rhs
+        case .greaterEqual:
+            return lhs >= rhs
+        }
+    }
+}
+
+extension Operator {
+    func evaluate(lhs: Double, rhs: Double) -> Double {
+        switch self {
+        case .plus:
+            return lhs + rhs
+        case .minus:
+            return lhs - rhs
+        case .times:
+            return lhs * rhs
+        case .divide:
+            if rhs == 0.0 {
+                return lhs * Double.infinity
+            }
+            return lhs / rhs
+        }
+    }
+}
+
+
+// MARK: Channel Retrieving
+
+extension Automation {
+    var channelsRequiredToBeRegistered: Set<Channel> {
+        statement.channelsRequiredToBeRegistered
+    }
+}
+
+extension Statement {
+    var channelsRequiredToBeRegistered: Set<Channel> {
+        condition.channelsRequiredToBeRegistered + action.channelsRequiredToBeRegistered
+    }
+}
+
+extension Action {
+    var channelsRequiredToBeRegistered: Set<Channel> {
+        expression.channelsRequiredToBeRegistered
+    }
+}
+
+extension Condition {
+    var channelsRequiredToBeRegistered: Set<Channel> {
+        expression1.channelsRequiredToBeRegistered + expression2.channelsRequiredToBeRegistered
+    }
+}
+
+extension Expression {
+    var channelsRequiredToBeRegistered: Set<Channel> {
+        switch self {
+        case .channel(let channel):
+            return [channel]
+        case .value(_):
+            return []
+        case let .expression(lhs, _, rhs):
+            return lhs.channelsRequiredToBeRegistered + rhs.channelsRequiredToBeRegistered
+        }
+    }
+}
+
+
+extension Automation {
+    var channelsRequiredToBeSubscribed: Set<Channel> {
+        statement.channelsRequiredToBeSubscribed
+    }
+}
+
+extension Statement {
+    var channelsRequiredToBeSubscribed: Set<Channel> {
+        condition.channelsRequiredToBeSubscribed
+    }
+}
+
+extension Action {
+    var channelsRequiredToBeSubscribed: Set<Channel> {
+        []
+    }
+}
+
+extension Condition {
+    var channelsRequiredToBeSubscribed: Set<Channel> {
+        expression1.channelsRequiredToBeSubscribed + expression2.channelsRequiredToBeSubscribed
+    }
+}
+
+extension Expression {
+    var channelsRequiredToBeSubscribed: Set<Channel> {
+        switch self {
+        case .channel(let channel):
+            return [channel]
+        case .value(_):
+            return []
+        case let .expression(lhs, _, rhs):
+            return lhs.channelsRequiredToBeSubscribed + rhs.channelsRequiredToBeSubscribed
+        }
+    }
+}
+
+private extension Set {
+    static func + (lhs: Self, rhs: Self) -> Self {
+        lhs.union(rhs)
     }
 }

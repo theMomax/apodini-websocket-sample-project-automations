@@ -26,8 +26,24 @@ struct ChannelReceptionHandler: Handler {
     @Environment(\.connection) var connection: Connection
     
     @State var acknowledged: Bool = false
+    
+    @Environment(\.automationStore) var automationStore: AutomationStore
 
     func handle() -> Response<ChannelReceptionResponse> {
-        return .send(.ok)
+        print("\(deviceId)/\(channelId) = \(value) (acknowledged=\(acknowledged); connection=\(connection.state)")
+        if !automationStore.updateValue(value, for: Channel(deviceId: deviceId, channelId: channelId)) {
+            return .final(.notRequired)
+        } else {
+            if connection.state == .end {
+                return .final(.reconnect)
+            } else {
+                if acknowledged {
+                    return .nothing
+                } else {
+                    acknowledged = true
+                    return .send(.ok)
+                }
+            }
+        }
     }
 }

@@ -24,7 +24,7 @@
         "repositoryURL": "https://github.com/Apodini/Apodini.git",
         "state": {
           "branch": "develop",
-          "revision": "c380b763f98bede73499a9643477d69f22165316",
+          "revision": "338ea6614b75d72096dd77459a7c31419835a4d4",
           "version": null
         }
       },
@@ -33,8 +33,8 @@
         "repositoryURL": "https://github.com/nerdsupremacist/AssociatedTypeRequirementsKit.git",
         "state": {
           "branch": null,
-          "revision": "db08ad5e0dfca1599749facfa5e7db86366e4222",
-          "version": "0.2.2"
+          "revision": "d861e6dd41ad0c1096a9a730611fa6a8cc307b0c",
+          "version": "0.3.1"
         }
       },
       {
@@ -170,6 +170,15 @@
           "branch": null,
           "revision": "a1877877ff173461e6168f57fbf6603628bfbf91",
           "version": "6.6.4"
+        }
+      },
+      {
+        "package": "multipart-kit",
+        "repositoryURL": "https://github.com/vapor/multipart-kit.git",
+        "state": {
+          "branch": null,
+          "revision": "73706f1883f2ba950d41f18aec7e3a53766d4a6d",
+          "version": "4.0.0"
         }
       },
       {
@@ -384,8 +393,8 @@
         "repositoryURL": "https://github.com/vapor/vapor.git",
         "state": {
           "branch": null,
-          "revision": "53d15b27ad59b4c91f6ea5fa401b891bd998e202",
-          "version": "4.37.1"
+          "revision": "bb87dcff4cf6d86d386308b4cb1393cefa4891a4",
+          "version": "4.39.2"
         }
       },
       {
@@ -402,8 +411,8 @@
         "repositoryURL": "https://github.com/jpsim/Yams.git",
         "state": {
           "branch": null,
-          "revision": "1bce5b89a11912fb8a8c48bd404bd24979472f27",
-          "version": "4.0.3"
+          "revision": "9003d51672e516cc59297b7e96bff1dfdedcb4ea",
+          "version": "4.0.4"
         }
       }
     ]
