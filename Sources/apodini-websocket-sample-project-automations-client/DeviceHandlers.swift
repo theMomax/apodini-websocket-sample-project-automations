@@ -8,6 +8,33 @@
 import Apodini
 import NIO
 
+struct DeviceSetupConfiguration<D: Device>: Configuration {
+    struct _DeviceDefinition: Codable {
+        var id: String
+        var channels: [String]
+        var subscribe: String
+        var update: String
+    }
+    
+    struct _RegisterEndpointInput: Codable {
+        var device: _DeviceDefinition
+    }
+    
+    let id: String
+    let device: D
+    
+    func configure(_ app: Application) {
+        print("Setup \(id)")
+        let result: Bool = try! StatelessClient(on: app.eventLoopGroup.next(), ignoreErrors: false).resolve(
+           one: _RegisterEndpointInput(device: _DeviceDefinition(
+               id: id,
+               channels: device.channels,
+               subscribe: "http://localhost:7001/v1/\(id)/subscribe/<CHANNEL>",
+               update: "http://localhost:7001/v1/\(id)/update/<CHANNEL>?value=<VALUE>")),
+            on: "v1.device").wait()
+        _ = result
+    }
+}
 struct SetupHandler<D: Device>: Handler {
     var device: D
     var deviceId: String
@@ -31,8 +58,8 @@ struct SetupHandler<D: Device>: Handler {
             one: _RegisterEndpointInput(device: _DeviceDefinition(
                 id: deviceId,
                 channels: device.channels,
-                subscribe: "http://localhost:7001/v1/outlet/subscribe/<CHANNEL>",
-                update: "http://localhost:7001/v1/outlet/update/<CHANNEL>?value=<VALUE>")),
+                subscribe: "http://localhost:7001/v1/\(deviceId)/subscribe/<CHANNEL>",
+                update: "http://localhost:7001/v1/\(deviceId)/update/<CHANNEL>?value=<VALUE>")),
             on: "v1.device")
     }
 }
@@ -45,6 +72,7 @@ struct SubscriptionHandler<D: Subscribable>: Handler {
     @Environment(\.eventLoopGroup) var eventLoopGroup: EventLoopGroup
     
     var device: D
+    var id: String
     
     struct _ChannelInputHandlerInput: Codable {
         var deviceId: String
@@ -60,7 +88,7 @@ struct SubscriptionHandler<D: Subscribable>: Handler {
         let eventLoop = eventLoopGroup.next()
         
         StatelessClient(on: eventLoop, ignoreErrors: false).resolve([String].self, from: publisher.map { value in
-            _ChannelInputHandlerInput(deviceId: "outlet", channelId: channelId, value: value)
+            _ChannelInputHandlerInput(deviceId: id, channelId: channelId, value: value)
         }, on: "v1.channel")
         
         return true

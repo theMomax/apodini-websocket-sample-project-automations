@@ -36,6 +36,10 @@ let package = Package(
             name: "apodini-websocket-sample-project-automations-client",
             dependencies: [
                 .product(name: "Apodini", package: "Apodini"),
-            ])
+            ],
+            resources: [
+                .process("Resources")
+            ]
+        ),
     ]
 )

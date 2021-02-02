@@ -30,7 +30,7 @@ struct ChannelReceptionHandler: Handler {
     @Environment(\.automationStore) var automationStore: AutomationStore
 
     func handle() -> Response<ChannelReceptionResponse> {
-        print("\(deviceId)/\(channelId) = \(value) (acknowledged=\(acknowledged); connection=\(connection.state)")
+        print("\(deviceId)/\(channelId) = \(value) (acknowledged=\(acknowledged); connection=\(connection.state))")
         if !automationStore.updateValue(value, for: Channel(deviceId: deviceId, channelId: channelId)) {
             return .final(.notRequired)
         } else {

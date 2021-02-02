@@ -56,7 +56,6 @@ class AutomationStore {
         self.client = client
     }
     
-    
     func updateValue(_ value: Double, for channel: Channel) -> Bool {
         _lock.guard {
             guard self.channelsRequiredToBeSubscribed.contains(channel) else {
@@ -66,37 +65,7 @@ class AutomationStore {
             values[channel] = value
             
             for automation in automations {
-                do {
-                    let updates = try automation.automation.evaluate(with: values)
-                    for update in updates {
-                        guard let device = devices.get(device: update.channel.deviceId) else {
-                            fatalError("Channels that are required to be subscribed should be a subset of the channels required to be registered!")
-                        }
-                        device.update(update.channel.channelId, with: update.value, using: self.client).whenComplete { result in
-                            switch result {
-                            case .success(_):
-                                self.logger.debug("Sent Update Message: \(update.channel) = \(update.value)")
-                            case .failure(let error):
-                                self.logger.error("Error sending Update Message: \(error)")
-                            }
-                        }
-                        
-                    }
-                } catch (AutomationEvaluationError.missingChannel(let channel)) {
-                    guard let device = devices.get(device: channel.deviceId) else {
-                        fatalError("Channels that are required to be subscribed should be a subset of the channels required to be registered!")
-                    }
-                    device.subscribe(to: channel.channelId, using: self.client).whenComplete { result in
-                        switch result {
-                        case .success(_):
-                            self.logger.debug("Sent Subscripiton Request Message: \(channel)")
-                        case .failure(let error):
-                            self.logger.error("Error sending Subscription Request Message: \(error)")
-                        }
-                    }
-                } catch {
-                    logger.critical("Unexpected Error: \(error)")
-                }
+                evaluate(automation.automation)
             }
             return true
         }
@@ -112,15 +81,42 @@ class AutomationStore {
                     throw AutomationRegistrationError.channelNotRegistered(requiredToBeRegistered)
                 }
             }
-            for requiredToBeSubscribed in automation.channelsRequiredToBeSubscribed {
-                guard let device = devices.get(device: requiredToBeSubscribed.deviceId) else {
+            automations.insert(IdentifiyableAutomation(automation: automation, uuid: uuid))
+            evaluate(automation)
+        }
+    }
+    
+    private func evaluate(_ automation: Automation) {
+        do {
+            let updates = try automation.evaluate(with: values)
+            for update in updates {
+                guard let device = devices.get(device: update.channel.deviceId) else {
                     fatalError("Channels that are required to be subscribed should be a subset of the channels required to be registered!")
                 }
-                device.subscribe(to: requiredToBeSubscribed.channelId, using: self.client).whenComplete { result in
-                    self.logger.info("Sent subscription message to \(device.id)/\(requiredToBeSubscribed.channelId): \(result)")
+                device.update(update.channel.channelId, with: update.value, using: self.client).whenComplete { result in
+                    switch result {
+                    case .success(_):
+                        self.logger.debug("Sent Update Message: \(update.channel) = \(update.value)")
+                    case .failure(let error):
+                        self.logger.error("Error sending Update Message: \(error)")
+                    }
+                }
+                
+            }
+        } catch (AutomationEvaluationError.missingChannel(let channel)) {
+            guard let device = devices.get(device: channel.deviceId) else {
+                fatalError("Channels that are required to be subscribed should be a subset of the channels required to be registered!")
+            }
+            device.subscribe(to: channel.channelId, using: self.client).whenComplete { result in
+                switch result {
+                case .success(_):
+                    self.logger.debug("Sent Subscripiton Request Message: \(channel)")
+                case .failure(let error):
+                    self.logger.error("Error sending Subscription Request Message: \(error)")
                 }
             }
-            automations.insert(IdentifiyableAutomation(automation: automation, uuid: uuid))
+        } catch {
+            logger.critical("Unexpected Error: \(error)")
         }
     }
     
@@ -165,11 +161,20 @@ extension NSLock {
 
 struct AutomationStoreKey: StorageKey {
     typealias Value = AutomationStore
-    static var defaultValue = AutomationStore(devices: DeviceStoreKey.defaultValue, client: HTTPClient(eventLoopGroupProvider: .createNew))
+    static var defaultValue: AutomationStore?
 }
 
 extension Application {
     var automationStore: AutomationStore {
-        get { AutomationStoreKey.defaultValue }
+        get { AutomationStoreKey.defaultValue! }
+        set { AutomationStoreKey.defaultValue = newValue }
+    }
+}
+
+struct AutomationStoreConfiguration: Configuration {
+    func configure(_ app: Application) {
+        let store = AutomationStore(devices: DeviceStoreKey.defaultValue, client: HTTPClient(eventLoopGroupProvider: .shared(app.eventLoopGroup)))
+        
+        app.automationStore = store
     }
 }
