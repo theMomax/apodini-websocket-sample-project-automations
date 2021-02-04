@@ -8,122 +8,99 @@
 import Foundation
 import AsyncHTTPClient
 import NIO
+import Apodini
 
 enum DeviceDecodingError: Error {
     case unableToDecode(String)
 }
 
-protocol Device: Subscribable, Updatable {
+protocol Device {
     var id: String { get }
     
-    var channels: [String] { get }
+    var channels: [String: ChannelBinding] { get }
+}
+
+class ChannelBinding {
+    private var connectAddress: String
+    
+    private var value: Double?
+    
+    private weak var observable: ObservableChannel? {
+        didSet {
+            if let value = value {
+                observable?.value = value
+            }
+        }
+    }
+    
+    private weak var mode: ChannelMode?
+    
+    init(_ connectAddress: String) {
+        self.connectAddress = connectAddress
+    }
+    
+    func update(to value: Double, using client: HTTPClient) -> EventLoopFuture<Void>? {
+        self.value = value
+        if let observable = self.observable {
+            observable.value = value
+            return nil
+        } else {
+            return self.connect(using: client)
+        }
+    }
+    
+    func register(_ observable: ObservableChannel, _ mode: ChannelMode) {
+        self.observable = observable
+        self.mode = mode
+    }
+    
+    func connect(using client: HTTPClient) -> EventLoopFuture<Void> {
+        return client.get(url: connectAddress).transform(to: Void())
+    }
+}
+
+class ObservableChannel: Apodini.ObservableObject {
+    @Apodini.Published var value: Double = 0
+}
+
+class ChannelMode: Apodini.ObservableObject {
+    @Apodini.Published var mustBeSubscribed: Bool = false
 }
 
 struct DeviceDefinition: Device {
     var id: String
     
-    var channels: [String]
+    var channels: [String: ChannelBinding]
     
-    private var subscribable: SubscriptionInstruction
-    
-    private var updatable: UpdateInstruction
-    
-    func subscribe(to channel: String, using client: HTTPClient) -> EventLoopFuture<Void> {
-        self.subscribable.subscribe(to: channel, using: client)
-    }
-    
-    func update(_ channel: String, with value: Double, using client: HTTPClient) -> EventLoopFuture<Void> {
-        self.updatable.update(channel, with: value, using: client)
-    }
+    private var rawAddress: String
 }
 
 extension DeviceDefinition: Codable {
     struct _DeviceDefinition: Codable {
+        static let channelPlaceholder: String = "<CHANNEL>"
+        
         var id: String
         var channels: [String]
-        var subscribe: String
-        var update: String
+        var address: String
     }
-    
     
     init(from decoder: Decoder) throws {
         let definition = try _DeviceDefinition(from: decoder)
         
-        guard let subscribable = SubscriptionInstruction(definition.subscribe) else {
-            throw DeviceDecodingError.unableToDecode(definition.subscribe)
+        self.id = definition.id
+        
+        self.rawAddress = definition.address
+        
+        var channels: [String: ChannelBinding] = [:]
+        
+        for channel in definition.channels {
+            channels[channel] = ChannelBinding(definition.address.replacingOccurrences(of: _DeviceDefinition.channelPlaceholder, with: channel))
         }
         
-        guard let updatable = UpdateInstruction(definition.update) else {
-            throw DeviceDecodingError.unableToDecode(definition.update)
-        }
-                
-        self.init(id: definition.id, channels: definition.channels, subscribable: subscribable, updatable: updatable)
+        self.channels = channels
     }
     
     func encode(to encoder: Encoder) throws {
-        try _DeviceDefinition(id: id, channels: channels, subscribe: subscribable.description, update: updatable.description).encode(to: encoder)
-    }
-}
-
-protocol Subscribable {
-    func subscribe(to channel: String, using client: HTTPClient) -> EventLoopFuture<Void>
-}
-
-protocol Updatable {
-    func update(_ channel: String, with value: Double, using client: HTTPClient) -> EventLoopFuture<Void>
-}
-
-private struct SubscriptionInstruction: LosslessStringConvertible {
-    static let channelPlaceholder: String = "<CHANNEL>"
-    
-    private let subscribeClosure: (String, HTTPClient) -> EventLoopFuture<Void>
-    
-    private let original: String
-    
-    init?(_ description: String) {
-        self.original = description
-        
-        self.subscribeClosure = { channel, client in
-            let url = description.replacingOccurrences(of: Self.channelPlaceholder, with: channel)
-            return client.get(url: url).transform(to: Void())
-        }
-    }
-    
-    var description: String {
-        original
-    }
-}
-
-extension SubscriptionInstruction: Subscribable {
-    func subscribe(to channel: String, using client: HTTPClient) -> EventLoopFuture<Void> {
-        self.subscribeClosure(channel, client)
-    }
-}
-
-private struct UpdateInstruction: LosslessStringConvertible {
-    static let valuePlaceholder: String = "<VALUE>"
-    static let channelPlaceholder: String = "<CHANNEL>"
-    
-    private let updateClosure: (String, Double, HTTPClient) -> EventLoopFuture<Void>
-    
-    private let original: String
-    
-    init?(_ description: String) {
-        self.original = description
-        
-        self.updateClosure = { channel, value, client in
-            let url = description.replacingOccurrences(of: Self.valuePlaceholder, with: String(format: "%f", value)).replacingOccurrences(of: Self.channelPlaceholder, with: channel)
-            return client.get(url: url).transform(to: Void())
-        }
-    }
-    
-    var description: String {
-        original
-    }
-}
-
-extension UpdateInstruction: Updatable {
-    func update(_ channel: String, with value: Double, using client: HTTPClient) -> EventLoopFuture<Void> {
-        self.updateClosure(channel, value, client)
+        try _DeviceDefinition(id: id, channels: Array(channels.keys), address:  rawAddress).encode(to: encoder)
     }
 }

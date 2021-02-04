@@ -24,7 +24,7 @@
         "repositoryURL": "https://github.com/Apodini/Apodini.git",
         "state": {
           "branch": "develop",
-          "revision": "338ea6614b75d72096dd77459a7c31419835a4d4",
+          "revision": "c63844a891089d654ece0e4f4b017e15c8ca6dca",
           "version": null
         }
       },
@@ -33,8 +33,8 @@
         "repositoryURL": "https://github.com/nerdsupremacist/AssociatedTypeRequirementsKit.git",
         "state": {
           "branch": null,
-          "revision": "d861e6dd41ad0c1096a9a730611fa6a8cc307b0c",
-          "version": "0.3.1"
+          "revision": "2e4c49c21ffb2135f1c99fbfcf2119c9d24f5e8c",
+          "version": "0.3.2"
         }
       },
       {
@@ -276,8 +276,8 @@
         "repositoryURL": "https://github.com/vapor/sql-kit.git",
         "state": {
           "branch": null,
-          "revision": "ea9928b7f4a801b175a00b982034d9c54ecb6167",
-          "version": "3.7.0"
+          "revision": "3453fd7573b3c1c666d5db38788163308a696193",
+          "version": "3.7.1"
         }
       },
       {

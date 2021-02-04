@@ -9,7 +9,7 @@ struct AutomationService: Apodini.WebService {
     
     var content: some Component {
         Group("channel") {
-            ChannelReceptionHandler()
+            ChannelHandler()
         }
         Group("automation") {
             AutomationRegistrationHandler().operation(.create)

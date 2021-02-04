@@ -42,6 +42,12 @@ class AutomationStore {
         })
     }
     
+    private var channelsRequiredToBeConnected: Set<Channel> {
+        automations.reduce(Set<Channel>(), { a, c in
+            a.union(c.automation.channelsRequiredToBeConnected)
+        })
+    }
+    
     private var channelsRequiredToBeRegistered: Set<Channel> {
         automations.reduce(Set<Channel>(), { a, c in
             a.union(c.automation.channelsRequiredToBeRegistered)
@@ -77,13 +83,34 @@ class AutomationStore {
                 guard let device = devices.get(device: requiredToBeRegistered.deviceId) else {
                     throw AutomationRegistrationError.deviceNotRegistered(requiredToBeRegistered.deviceId)
                 }
-                if !device.channels.contains(requiredToBeRegistered.channelId) {
+                if device.channels[requiredToBeRegistered.channelId] == nil {
                     throw AutomationRegistrationError.channelNotRegistered(requiredToBeRegistered)
                 }
             }
             automations.insert(IdentifiyableAutomation(automation: automation, uuid: uuid))
             evaluate(automation)
         }
+    }
+    
+    func mustBeSubscribed(_ channel: Channel) -> Bool {
+        self.channelsRequiredToBeSubscribed.contains(channel)
+    }
+    
+    func mustBeConnected(_ channel: Channel) -> Bool {
+        self.channelsRequiredToBeConnected.contains(channel)
+    }
+    
+    func registerChannel(observable: ObservableChannel, mode: ChannelMode, on channel: Channel) -> Bool {
+        guard let device = self.devices.get(device: channel.deviceId) else {
+            return false
+        }
+        
+        guard let channel = device.channels[channel.channelId] else {
+            return false
+        }
+        
+        channel.register(observable, mode)
+        return true
     }
     
     private func evaluate(_ automation: Automation) {
@@ -93,12 +120,12 @@ class AutomationStore {
                 guard let device = devices.get(device: update.channel.deviceId) else {
                     fatalError("Channels that are required to be subscribed should be a subset of the channels required to be registered!")
                 }
-                device.update(update.channel.channelId, with: update.value, using: self.client).whenComplete { result in
+                device.channels[update.channel.channelId]?.update(to: update.value, using: self.client)?.whenComplete { result in
                     switch result {
                     case .success(_):
-                        self.logger.debug("Sent Update Message: \(update.channel) = \(update.value)")
+                        self.logger.debug("Requested channel \(update.channel) to connect.")
                     case .failure(let error):
-                        self.logger.error("Error sending Update Message: \(error)")
+                        self.logger.error("Error sending Connect Message: \(error)")
                     }
                 }
                 
@@ -107,12 +134,12 @@ class AutomationStore {
             guard let device = devices.get(device: channel.deviceId) else {
                 fatalError("Channels that are required to be subscribed should be a subset of the channels required to be registered!")
             }
-            device.subscribe(to: channel.channelId, using: self.client).whenComplete { result in
+            device.channels[channel.channelId]?.connect(using: self.client).whenComplete { result in
                 switch result {
                 case .success(_):
-                    self.logger.debug("Sent Subscripiton Request Message: \(channel)")
+                    self.logger.debug("Sent Connect Message: \(channel)")
                 case .failure(let error):
-                    self.logger.error("Error sending Subscription Request Message: \(error)")
+                    self.logger.error("Error sending Connect Message: \(error)")
                 }
             }
         } catch {

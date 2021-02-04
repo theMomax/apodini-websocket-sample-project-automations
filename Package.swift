@@ -21,6 +21,7 @@ let package = Package(
         // Dependencies declare other packages that this package depends on.
         // .package(url: /* package url */, from: "1.0.0"),
         .package(url: "https://github.com/Apodini/Apodini.git", .branch("develop")),
+//        .package(path: "../../Apodini/Apodini"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.0.0")
     ],
     targets: [

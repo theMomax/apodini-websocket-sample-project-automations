@@ -7,13 +7,13 @@
 
 import Apodini
 import NIO
+import OpenCombine
 
 struct DeviceSetupConfiguration<D: Device>: Configuration {
     struct _DeviceDefinition: Codable {
         var id: String
         var channels: [String]
-        var subscribe: String
-        var update: String
+        var address: String
     }
     
     struct _RegisterEndpointInput: Codable {
@@ -26,45 +26,16 @@ struct DeviceSetupConfiguration<D: Device>: Configuration {
     func configure(_ app: Application) {
         print("Setup \(id)")
         let result: Bool = try! StatelessClient(on: app.eventLoopGroup.next(), ignoreErrors: false).resolve(
-           one: _RegisterEndpointInput(device: _DeviceDefinition(
-               id: id,
-               channels: device.channels,
-               subscribe: "http://localhost:7001/v1/\(id)/subscribe/<CHANNEL>",
-               update: "http://localhost:7001/v1/\(id)/update/<CHANNEL>?value=<VALUE>")),
-            on: "v1.device").wait()
+            one: _RegisterEndpointInput(device: _DeviceDefinition(
+            id: id,
+            channels: device.channels,
+            address: "http://localhost:7001/v1/\(id)/connect/<CHANNEL>")),
+       on: "v1.device").wait()
         _ = result
     }
 }
-struct SetupHandler<D: Device>: Handler {
-    var device: D
-    var deviceId: String
-    
-    struct _DeviceDefinition: Codable {
-        var id: String
-        var channels: [String]
-        var subscribe: String
-        var update: String
-    }
-    
-    struct _RegisterEndpointInput: Codable {
-        var device: _DeviceDefinition
-    }
-    
-    @Environment(\.eventLoopGroup) var eventLoopGroup: EventLoopGroup
-    
-    func handle() throws -> EventLoopFuture<Bool> {
-        print("Setup \(deviceId)")
-        return StatelessClient(on: eventLoopGroup.next(), ignoreErrors: false).resolve(
-            one: _RegisterEndpointInput(device: _DeviceDefinition(
-                id: deviceId,
-                channels: device.channels,
-                subscribe: "http://localhost:7001/v1/\(deviceId)/subscribe/<CHANNEL>",
-                update: "http://localhost:7001/v1/\(deviceId)/update/<CHANNEL>?value=<VALUE>")),
-            on: "v1.device")
-    }
-}
 
-struct SubscriptionHandler<D: Subscribable>: Handler {
+struct ConnectionHandler<D: Device>: Handler {
     @Throws(.badInput, reason: "This device does not have a channel with the given id.") var unknownChannelError: ApodiniError
     
     @Parameter var channelId: String
@@ -74,24 +45,94 @@ struct SubscriptionHandler<D: Subscribable>: Handler {
     var device: D
     var id: String
     
-    struct _ChannelInputHandlerInput: Codable {
-        var deviceId: String
-        var channelId: String
-        var value: Double
-    }
-    
     func handle() throws -> Bool {
-        print("Subscription \(channelId)")
+        print("Connection \(channelId)")
         guard let publisher = device.subscribe(to: channelId) else {
             throw unknownChannelError
         }
         let eventLoop = eventLoopGroup.next()
         
-        StatelessClient(on: eventLoop, ignoreErrors: false).resolve([String].self, from: publisher.map { value in
-            _ChannelInputHandlerInput(deviceId: id, channelId: channelId, value: value)
-        }, on: "v1.channel")
+        let input = CurrentValueSubject<_ChannelHandlerInput, Never>(_ChannelHandlerInput(deviceId: id, channelId: channelId, value: nil))
+        
+        var cancellables = Set<AnyCancellable>()
+        
+        StatelessClient(on: eventLoop, ignoreErrors: true).resolve(_ChannelResponse.self, from: input, on: "v1.channel").sink(receiveCompletion: { completion in
+            switch completion {
+            case .failure(let error):
+                fatalError("\(error)")
+            case .finished:
+                break
+            }
+            cancellables.removeAll()
+        }, receiveValue: { value in
+            switch value {
+            case .notRequired:
+                input.send(completion: .finished)
+            case .updateMe:
+                publisher.sink(receiveCompletion: { completion in
+                    input.send(completion: completion)
+                }, receiveValue: { value in
+                    input.send(_ChannelHandlerInput(deviceId: id, channelId: channelId, value: value))
+                }).store(in: &cancellables)
+            case .update(let value):
+                _ = device.update(channel: channelId, with: value)
+            default:
+                break
+            }
+        }).store(in: &cancellables)
         
         return true
+    }
+    
+    struct _ChannelHandlerInput: Codable {
+        var deviceId: String
+        var channelId: String
+        var value: Double?
+    }
+    
+    enum _ChannelResponse: Content, Decodable {
+        /// The client shall send a message with the new value every time
+        /// it changes the channel's value.
+        case updateMe
+        /// An automation has caused this channel's value to change.
+        case update(Double)
+        /// The channel was never or is no longer required an can be
+        /// closed.
+        case notRequired
+        /// The channel is still needed, do reopen as soon as possible.
+        case reconnect
+        
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case .update(let value):
+                try value.encode(to: encoder)
+            case .updateMe:
+                try "updateMe".encode(to: encoder)
+            case .notRequired:
+                try "notRequired".encode(to: encoder)
+            case .reconnect:
+                try "reconnect".encode(to: encoder)
+            }
+        }
+        
+        init(from decoder: Decoder) throws {
+            if let value = try? Double(from: decoder) {
+                self = .update(value)
+            } else {
+                let stringValue = try String(from: decoder)
+                
+                switch stringValue {
+                case "updateMe":
+                    self = .updateMe
+                case "notRequired":
+                    self = .notRequired
+                case "reconnect":
+                    self = .reconnect
+                default:
+                    throw DecodingError.typeMismatch(Self.self, DecodingError.Context(codingPath: [], debugDescription: "Wrong enum value \(stringValue)"))
+                }
+            }
+        }
     }
 }
 
@@ -130,4 +171,3 @@ struct RetrieveHandler<D: Retrievable>: Handler {
         return value
     }
 }
-

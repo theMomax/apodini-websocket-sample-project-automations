@@ -61,17 +61,29 @@ public struct StatelessClient {
     /// completes when the client receives a close-content-message from the server. The future contains
     /// all server-messages received on the relevant context.
     public func resolve<I: Encodable, O: Decodable>(many inputs: [I], on endpoint: String) -> EventLoopFuture<[O]> {
-        resolve(from: inputs.publisher, on: endpoint)
+        let promise = eventLoop.makePromise(of: [O].self)
+        var cancellables = Set<AnyCancellable>()
+        resolve(from: inputs.publisher, on: endpoint).collect().sink(receiveCompletion: { completion in
+            switch completion {
+            case .failure(let error):
+                promise.fail(error)
+            default:
+                break
+            }
+            cancellables.removeAll()
+        }, receiveValue: { value in
+            promise.succeed(value)
+        }).store(in: &cancellables)
+        
+        return promise.futureResult
     }
     
-    /// Opens a new WebSocket connection, creates a new context on the given `endpoint` and sends
-    /// one client message for each element in `input`. Afterwards it sends a close-context-message. The future
-    /// completes when the client receives a close-content-message from the server. The future contains
-    /// all server-messages received on the relevant context.
-    @discardableResult
-    public func resolve<P: Publisher, O: Decodable>(_ type: [O].Type = [O].self, from publisher: P, on endpoint: String) -> EventLoopFuture<[O]> where P.Failure == Never, P.Output: Encodable {
-        let response = eventLoop.makePromise(of: [O].self)
-        var responses: [O] = []
+    public func resolve<I: Publisher, O: Decodable>(_ type: O.Type = O.self, from publisher: I, on endpoint: String) -> AnyPublisher<O, Error> where I.Failure == Never, I.Output: Encodable {
+        let output = PassthroughSubject<O, Error>()
+        
+        let publisher = publisher.buffer()
+        
+        var cancellables = Set<AnyCancellable>()
         
         _ = WebSocket.connect(
             to: self.address,
@@ -80,35 +92,34 @@ public struct StatelessClient {
             let contextId = UUID()
             let contextPromise = eventLoop.makePromise(of: Void.self)
             self.sendOpen(context: contextId, on: endpoint, to: websocket, promise: contextPromise)
-            
+
             contextPromise.futureResult.whenComplete { result in
                 switch result {
                 case .failure(let error):
-                    response.fail(error)
+                    output.send(completion: .failure(error))
                     // close connection
                     _ = websocket.close()
                 case .success:
-                    self.send(messagePublisher: publisher, on: contextId, to: websocket, promise: response)
+                    self.send(messagePublisher: publisher, on: contextId, to: websocket, output: output, cancellables: &cancellables)
                 }
             }
 
             websocket.onText { websocket, string in
-                self.onText(websocket: websocket, string: string, context: contextId, promise: response, responses: &responses)
+                self.onText(
+                    websocket: websocket,
+                    string: string,
+                    context: contextId,
+                    output: output
+                )
             }
-            
-            var done = false
-            response.futureResult.whenSuccess { _ in
-                done = true
-            }
-            
+
             websocket.onClose.whenComplete { _ in
-                if !done {
-                    response.fail(ServerError.noMessage)
-                }
+                output.send(completion: .finished)
+                cancellables.removeAll()
             }
         }
         
-        return response.futureResult
+        return output.eraseToAnyPublisher()
     }
     
     private func sendOpen(context: UUID, on endpoint: String, to websocket: WebSocket, promise: EventLoopPromise<Void>) {
@@ -122,11 +133,9 @@ public struct StatelessClient {
         }
     }
     
-    private func send<P: Publisher, O>(messagePublisher: P, on context: UUID, to websocket: WebSocket, promise: EventLoopPromise<O>) where P.Failure == Never, P.Output: Encodable {
-        var cancellables: Set<AnyCancellable> = []
+    private func send<P: Publisher, O>(messagePublisher: P, on context: UUID, to websocket: WebSocket, output: PassthroughSubject<O, Error>, cancellables: inout Set<AnyCancellable>) where P.Failure == Never, P.Output: Encodable {        
         messagePublisher.sink(receiveCompletion: { _ in
-            self.sendClose(context: context, to: websocket, promise: promise)
-            cancellables.removeAll()
+            self.sendClose(context: context, to: websocket, output: output)
         }, receiveValue: { input in
             do {
                 let message = try encode(ClientMessage(context: context, parameters: input))
@@ -134,22 +143,21 @@ public struct StatelessClient {
                 // create context on user endpoint
                 websocket.send(message)
             } catch {
-                promise.fail(error)
+                output.send(completion: .failure(error))
                 // close connection
                 _ = websocket.close()
-                cancellables.removeAll()
             }
         }).store(in: &cancellables)
     }
     
-    private func sendClose<O>(context: UUID, to websocket: WebSocket, promise: EventLoopPromise<O>) {
+    private func sendClose<O>(context: UUID, to websocket: WebSocket, output: PassthroughSubject<O, Error>) {
         do {
             let message = try encode(CloseContextMessage(context: context))
             self.logger.debug(">>> \(message)")
             // announce end of client-messages
             websocket.send(message)
         } catch {
-            promise.fail(error)
+            output.send(completion: .failure(error))
             // close connection
             _ = websocket.close()
         }
@@ -159,13 +167,12 @@ public struct StatelessClient {
         websocket: WebSocket,
         string: String,
         context: UUID,
-        promise: EventLoopPromise<[O]>,
-        responses: inout [O]
+        output: PassthroughSubject<O, Error>
     ) {
         self.logger.debug("<<< \(string)")
         
         guard let data = string.data(using: .utf8) else {
-            promise.fail(ConversionError.couldNotDecodeUsingUTF8)
+            output.send(completion: .failure(ConversionError.couldNotDecodeUsingUTF8))
             // close connection
             _ = websocket.close()
             return
@@ -174,13 +181,13 @@ public struct StatelessClient {
         do {
             let result = try JSONDecoder().decode(ServiceMessage<O>.self, from: data)
             if result.context == context {
-                responses.append(result.content)
+                output.send(result.content)
             }
         } catch {
             do {
                 let result = try JSONDecoder().decode(ErrorMessage<String>.self, from: data)
                 if (result.context == context || result.context == nil) && !self.ignoreErrors {
-                    promise.fail(ServerError.message(result.error))
+                    output.send(completion: .failure(ServerError.message(result.error)))
                     // close connection
                     _ = websocket.close()
                     return
@@ -189,7 +196,6 @@ public struct StatelessClient {
                 do {
                     let result = try JSONDecoder().decode(CloseContextMessage.self, from: data)
                     if result.context == context {
-                        promise.succeed(responses)
                         // close connection
                         _ = websocket.close()
                     }
@@ -197,6 +203,10 @@ public struct StatelessClient {
             }
         }
     }
+}
+
+private class MockCancellable {
+    
 }
 
 private enum ServerError: Error {

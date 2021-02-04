@@ -10,7 +10,7 @@ import Apodini
 import NIO
 
 struct ClientService: Apodini.WebService {
-    let outlet = MockOutletDevice(on: 0, power: 0.0)
+    let outlet = MockOutletDevice(on: 1, power: 0.0)
     let lamp = MockLampDevice(on: 0)
     let motionDetector = MockMotionDetectorDevice(triggered: 0)
     
@@ -38,8 +38,8 @@ struct DeviceComponent<D: Device>: Component {
     
     var content: some Component {
         Group(id) {
-            Group("subscribe", $channelId) {
-                SubscriptionHandler(channelId: $channelId, device: device, id: id)
+            Group("connect", $channelId) {
+                ConnectionHandler(channelId: $channelId, device: device, id: id)
             }
             Group("update", $channelId) {
                 UpdateHandler(channelId: $channelId, device: device)

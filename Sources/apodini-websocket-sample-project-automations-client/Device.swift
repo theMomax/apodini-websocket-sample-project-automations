@@ -54,8 +54,14 @@ class MockOutletDevice: Device {
     func update(channel: String, with value: Double) -> Bool {
         switch channel {
         case "on":
+            if on.value == value {
+                return true
+            }
             on.value = value
         case "power":
+            if power.value == value {
+                return true
+            }
             power.value = value
         default:
             return false
@@ -100,6 +106,9 @@ class MockLampDevice: Device {
     func update(channel: String, with value: Double) -> Bool {
         switch channel {
         case "on":
+            if on.value == value {
+                return true
+            }
             on.value = value
             if value == 0 {
                 if let lampOff = Bundle.module.path(forResource: "lamp-off", ofType: "jpg") {
@@ -151,6 +160,9 @@ class MockMotionDetectorDevice: Device {
     func update(channel: String, with value: Double) -> Bool {
         switch channel {
         case "triggered":
+            if triggered.value == value {
+                return true
+            }
             triggered.value = value
         default:
             return false

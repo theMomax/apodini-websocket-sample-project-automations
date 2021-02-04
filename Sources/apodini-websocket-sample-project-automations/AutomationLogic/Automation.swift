@@ -393,6 +393,43 @@ extension Expression {
 
 
 extension Automation {
+    var channelsRequiredToBeConnected: Set<Channel> {
+        statement.channelsRequiredToBeConnected
+    }
+}
+
+extension Statement {
+    var channelsRequiredToBeConnected: Set<Channel> {
+        condition.channelsRequiredToBeConnected + action.channelsRequiredToBeConnected
+    }
+}
+
+extension Action {
+    var channelsRequiredToBeConnected: Set<Channel> {
+        [channel]
+    }
+}
+
+extension Condition {
+    var channelsRequiredToBeConnected: Set<Channel> {
+        expression1.channelsRequiredToBeConnected + expression2.channelsRequiredToBeConnected
+    }
+}
+
+extension Expression {
+    var channelsRequiredToBeConnected: Set<Channel> {
+        switch self {
+        case .channel(let channel):
+            return [channel]
+        case .value(_):
+            return []
+        case let .expression(lhs, _, rhs):
+            return lhs.channelsRequiredToBeConnected + rhs.channelsRequiredToBeConnected
+        }
+    }
+}
+
+extension Automation {
     var channelsRequiredToBeSubscribed: Set<Channel> {
         statement.channelsRequiredToBeSubscribed
     }
@@ -428,6 +465,7 @@ extension Expression {
         }
     }
 }
+
 
 private extension Set {
     static func + (lhs: Self, rhs: Self) -> Self {
