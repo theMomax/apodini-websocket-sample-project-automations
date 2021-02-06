@@ -5,9 +5,10 @@
 //  Created by Max Obermeier on 02.02.21.
 //
 
-import OpenCombine
 import Apodini
-import NIO
+import ApodiniWebSocket
+import ApodiniOpenAPI
+import ApodiniREST
 
 struct ClientService: Apodini.WebService {
     let outlet = MockOutletDevice(on: 1, power: 0.0)
@@ -19,6 +20,11 @@ struct ClientService: Apodini.WebService {
         DeviceSetupConfiguration(id: "lamp", device: lamp)
         DeviceSetupConfiguration(id: "outlet", device: outlet)
         DeviceSetupConfiguration(id: "motiondetector", device: motionDetector)
+        
+        ExporterConfiguration()
+            .exporter(WebSocketInterfaceExporter.self)
+            .exporter(OpenAPIInterfaceExporter.self)
+            .exporter(RESTInterfaceExporter.self)
     }
     
     var content: some Component {

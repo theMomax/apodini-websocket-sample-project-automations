@@ -22,7 +22,8 @@ let package = Package(
         // .package(url: /* package url */, from: "1.0.0"),
         .package(url: "https://github.com/Apodini/Apodini.git", .branch("develop")),
 //        .package(path: "../../Apodini/Apodini"),
-        .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.0.0")
+        .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.0.0"),
+        .package(url: "https://github.com/OpenCombine/OpenCombine.git", .upToNextMinor(from: "0.11.0")),
     ],
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
@@ -31,12 +32,19 @@ let package = Package(
             name: "apodini-websocket-sample-project-automations",
             dependencies: [
                 .product(name: "Apodini", package: "Apodini"),
+                .product(name: "ApodiniWebSocket", package: "Apodini"),
+                .product(name: "ApodiniOpenAPI", package: "Apodini"),
+                .product(name: "ApodiniREST", package: "Apodini"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client")
             ]),
         .target(
             name: "apodini-websocket-sample-project-automations-client",
             dependencies: [
                 .product(name: "Apodini", package: "Apodini"),
+                .product(name: "ApodiniWebSocket", package: "Apodini"),
+                .product(name: "ApodiniOpenAPI", package: "Apodini"),
+                .product(name: "ApodiniREST", package: "Apodini"),
+                .product(name: "OpenCombine", package: "OpenCombine"),
             ],
             resources: [
                 .process("Resources")

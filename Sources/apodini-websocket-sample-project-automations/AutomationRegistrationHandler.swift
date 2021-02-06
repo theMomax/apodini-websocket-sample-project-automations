@@ -7,6 +7,7 @@
 
 import Apodini
 import Foundation
+import ApodiniWebSocket
 
 extension Automation: Codable {
     func encode(to encoder: Encoder) throws {
