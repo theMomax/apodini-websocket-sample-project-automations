@@ -54,20 +54,24 @@ struct ChannelHandler: Handler {
 
     func handle() throws -> Response<ChannelResponse> {
         let channel = Channel(deviceId: deviceId, channelId: channelId)
-        
+        // in case the client unexpectedly wants to disconnect we tell it to reconnect ASAP
         if connection.state == .end && automationStore.mustBeConnected(channel) {
             return .final(.reconnect)
         }
-        
+        // in case no automation depends on this channel we close the connection
         if !automationStore.mustBeConnected(channel) {
             return .final(.notRequired)
         }
         
+        // on the first evaluation we have to do some setup-tasks
         if initial {
+            // first we pass the `ObservedObject`s to the service-layer so it can notify us asynchronically about
+            // updates regarding the channel's value or the channel's requirements
             if !automationStore.registerChannel(observable: observableChannel, mode: channelMode, on: channel) {
                 throw unknownChannelError
             }
-            
+            // if there is an automation which's condition depends on this channel we tell the client it has
+            // to update us whenever its value changes
             if automationStore.mustBeSubscribed(channel) {
                 return .send(.updateMe)
             } else {
@@ -75,20 +79,25 @@ struct ChannelHandler: Handler {
             }
         }
         
+        // in case this channel was first only used to update the client when the value was changed by an automation,
+        // but now it is also used in an automation's condition, we need to tell the client it now also needs to
+        // send updates
         if (_channelMode.changed && channelMode.mustBeSubscribed) {
             return .send(.updateMe)
         }
         
+        // an automation changed the channel's value, so we tell the client
         if (_observableChannel.changed) {
             return .send(.update(observableChannel.value))
         }
         
+        // at this point we know that this evaluation was caused by a client message (not the initial one), which
+        // always have to update the value
         guard let value = value else {
             throw noValueError
         }
-        
+        // we pass the update to the service-layer without responding
         _ = automationStore.updateValue(value, for: channel)
-        
         return .nothing
     }
 }

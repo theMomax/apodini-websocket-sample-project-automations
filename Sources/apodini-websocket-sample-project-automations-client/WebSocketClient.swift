@@ -78,6 +78,10 @@ public struct StatelessClient {
         return promise.futureResult
     }
     
+    /// Opens a new WebSocket connection, creates a new context on the given `endpoint` and sends
+    /// one client message for each value received from `input`. Afterwards it sends a close-context-message.
+    /// All received value-messages are sent over the returned publisher. Error-messages trigger a `failure`
+    /// completion; close-context messages trigger a `finished` completion.
     public func resolve<I: Publisher, O: Decodable>(_ type: O.Type = O.self, from publisher: I, on endpoint: String) -> AnyPublisher<O, Error> where I.Failure == Never, I.Output: Encodable {
         let output = PassthroughSubject<O, Error>()
         

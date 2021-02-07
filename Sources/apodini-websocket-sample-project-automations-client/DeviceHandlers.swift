@@ -9,6 +9,7 @@ import Apodini
 import NIO
 import OpenCombine
 
+// registers the device to the Hub server
 struct DeviceSetupConfiguration<D: Device>: Configuration {
     struct _DeviceDefinition: Codable {
         var id: String
@@ -47,11 +48,16 @@ struct ConnectionHandler<D: Device>: Handler {
     
     func handle() throws -> Bool {
         print("Connection \(channelId)")
+        // get a publisher that fires when the requested channel's value is updated
         guard let publisher = device.subscribe(to: channelId) else {
             throw unknownChannelError
         }
+        
+        // setup a WebSocket client that communicates with the Hub's `/v1/channel` enpoint
         let eventLoop = eventLoopGroup.next()
         
+        // This publisher is passed into the client. It sends an initial message with `value = nil`. Later on we just pass in updates from
+        // the channel's `publisher` we previously obtained from the `device`.
         let input = CurrentValueSubject<_ChannelHandlerInput, Never>(_ChannelHandlerInput(deviceId: id, channelId: channelId, value: nil))
         
         var cancellables = Set<AnyCancellable>()
@@ -67,14 +73,22 @@ struct ConnectionHandler<D: Device>: Handler {
         }, receiveValue: { value in
             switch value {
             case .notRequired:
+                // this connection is not needed anymore, so we close it
                 input.send(completion: .finished)
             case .updateMe:
+                // the Hub now also wants to receive updates from our side
+                // regarding the channel's value, so we pipe the channel's `publisher`'s
+                // output into the `StatelessClient`'s `input`
                 publisher.sink(receiveCompletion: { completion in
                     input.send(completion: completion)
                 }, receiveValue: { value in
                     input.send(_ChannelHandlerInput(deviceId: id, channelId: channelId, value: value))
                 }).store(in: &cancellables)
             case .update(let value):
+                // an automation caused this channel's value to change, so we update the device's state
+                
+                // the `update` function makes sure the `publisher` is not triggered if the value hasn't
+                // really changed
                 _ = device.update(channel: channelId, with: value)
             default:
                 break

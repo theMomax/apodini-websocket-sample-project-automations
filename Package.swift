@@ -20,7 +20,7 @@ let package = Package(
     dependencies: [
         // Dependencies declare other packages that this package depends on.
         // .package(url: /* package url */, from: "1.0.0"),
-        .package(url: "https://github.com/Apodini/Apodini.git", .branch("develop")),
+        .package(url: "https://github.com/Apodini/Apodini.git", .revision("beaa14c600ce1f92cf64cb9ab07b82c7a25ec0ba")),
 //        .package(path: "../../Apodini/Apodini"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.0.0"),
         .package(url: "https://github.com/OpenCombine/OpenCombine.git", .upToNextMinor(from: "0.11.0")),

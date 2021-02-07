@@ -64,12 +64,15 @@ class AutomationStore {
     
     func updateValue(_ value: Double, for channel: Channel) -> Bool {
         _lock.guard {
+            // we don't need to evaluate automations if none depend on this `channel`'s value
             guard self.channelsRequiredToBeSubscribed.contains(channel) else {
                 return false
             }
             
+            // update the `channel`'s value and execute all automations
             values[channel] = value
             
+            // this could be optimized to only execute automations that depend on `channel`
             for automation in automations {
                 evaluate(automation.automation)
             }
@@ -79,6 +82,7 @@ class AutomationStore {
     
     func addAutomation(_ automation: Automation, with uuid: UUID) throws {
         try _lock.guard {
+            // check if all channel's mentioned in the automation are known to the Hub
             for requiredToBeRegistered in automation.channelsRequiredToBeRegistered {
                 guard let device = devices.get(device: requiredToBeRegistered.deviceId) else {
                     throw AutomationRegistrationError.deviceNotRegistered(requiredToBeRegistered.deviceId)
@@ -87,7 +91,10 @@ class AutomationStore {
                     throw AutomationRegistrationError.channelNotRegistered(requiredToBeRegistered)
                 }
             }
+            // store the automation and evaluate it a first time
             automations.insert(IdentifiyableAutomation(automation: automation, uuid: uuid))
+            // Note that we haven't taken care of connecting to the relevant channels yet.
+            // This is done in `evaluate`.
             evaluate(automation)
         }
     }
@@ -100,6 +107,11 @@ class AutomationStore {
         self.channelsRequiredToBeConnected.contains(channel)
     }
     
+    // This method is used to rigister a bidirectional connection on `/v1/channel`. The
+    // `observable` and `mode` can be used to trigger the evaluation of the corresponding `ChannelHandler`.
+    // The first carries the channel's value for outgoing updates whereas `mode` notifies the handler when
+    // its now also has subscribe for incoming updates on the handled channel. Both `ObservableObject`s are
+    // stored as using `weak` references inside the `DeviceStore`
     func registerChannel(observable: ObservableChannel, mode: ChannelMode, on channel: Channel) -> Bool {
         guard let device = self.devices.get(device: channel.deviceId) else {
             return false
@@ -115,11 +127,15 @@ class AutomationStore {
     
     private func evaluate(_ automation: Automation) {
         do {
+            // try to evaluate the automation
             let updates = try automation.evaluate(with: values)
+            // if succeeded, execute all resulting updates
             for update in updates {
                 guard let device = devices.get(device: update.channel.deviceId) else {
                     fatalError("Channels that are required to be subscribed should be a subset of the channels required to be registered!")
                 }
+                // the `update` method takes care of connecting to the according channel if there is no connection registered yet (the
+                // `ObservableChannel` is not present) before it sends out the update
                 device.channels[update.channel.channelId]?.update(to: update.value, using: self.client)?.whenComplete { result in
                     switch result {
                     case .success(_):
@@ -131,6 +147,7 @@ class AutomationStore {
                 
             }
         } catch (AutomationEvaluationError.missingChannel(let channel)) {
+            // if we first need to subscribe to a channel to be able to evaluate the channel we send out a connect-request
             guard let device = devices.get(device: channel.deviceId) else {
                 fatalError("Channels that are required to be subscribed should be a subset of the channels required to be registered!")
             }
@@ -144,19 +161,6 @@ class AutomationStore {
             }
         } catch {
             logger.critical("Unexpected Error: \(error)")
-        }
-    }
-    
-    @discardableResult
-    func removeAutomation(with uuid: UUID) -> Automation? {
-        _lock.guard {
-            let identifyableAutomation = automations.first(where: { automation in automation.uuid == uuid })
-            
-            guard let automation = identifyableAutomation else {
-                return nil
-            }
-            
-            return automations.remove(automation)?.automation
         }
     }
 }
